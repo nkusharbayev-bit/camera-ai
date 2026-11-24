@@ -1,0 +1,32 @@
+# Camera AI sozlamalari.
+# Telegram token va chat id bu yerga YOZILMAYDI — muhit o'zgaruvchilari orqali beriladi:
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# RTSP parolni ham muhit o'zgaruvchisida saqlash mumkin: source: rtsp://admin:${CAM1_PASSWORD}@...
+
+cameras:
+  - id: cam1
+    name: "Asosiy zal"
+    # Hikvision:  rtsp://admin:PAROL@192.168.1.64:554/Streaming/Channels/101
+    # Dahua:      rtsp://admin:PAROL@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0
+    source: "rtsp://admin:${CAM1_PASSWORD}@192.168.1.64:554/Streaming/Channels/101"
+    zones: config/zones/cam1.json
+    fps: 10            # tahlil qilinadigan kadr/soniya (CPU uchun 5-10 yetarli)
+
+detector:
+  model: yolo11n-pose.pt   # GPU bo'lsa yolo11s-pose.pt aniqroq
+  device: null             # null = avtomatik, "cpu", "0" (GPU)
+  conf: 0.4
+
+rules:
+  min_shelf_seconds: 3.0      # javon oldida shuncha turgan bo'lsa — narsa olgan bo'lishi mumkin
+  min_checkout_seconds: 4.0   # kassada shuncha turgan bo'lsa — to'lagan deb hisoblanadi
+  min_exit_seconds: 0.3
+  conceal_seconds: 1.0        # qo'l cho'ntak/bel yonida shuncha tursa — "yashirish" belgisi
+  require_concealment: false  # true: faqat yashirish ko'rilganda signal (kamroq yolg'on signal)
+  track_ttl_seconds: 10.0
+
+clip:
+  pre_seconds: 6
+  post_seconds: 6
+
+data_dir: data

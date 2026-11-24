@@ -1,0 +1,8 @@
+ultralytics>=8.3
+lap>=0.5.12               # ByteTrack uchun
+opencv-python-headless>=4.9
+numpy>=1.26
+pyyaml>=6.0
+fastapi>=0.110
+uvicorn[standard]>=0.29
+httpx>=0.27

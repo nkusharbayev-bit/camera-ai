@@ -1,0 +1,23 @@
+# Ishga tushirish:  docker compose up -d --build
+services:
+  cam1:                       # har bir kamera uchun shunday blok qo'shing
+    build: .
+    command: python -m app.main --camera cam1
+    env_file: .env
+    volumes: [./data:/app/data, ./config:/app/config]
+    restart: unless-stopped
+
+  bot:
+    build: .
+    command: python -m app.bot
+    env_file: .env
+    volumes: [./data:/app/data, ./config:/app/config]
+    restart: unless-stopped
+
+  panel:
+    build: .
+    command: uvicorn app.api:create_app --factory --host 0.0.0.0 --port 8000
+    env_file: .env
+    volumes: [./data:/app/data, ./config:/app/config]
+    ports: ["8000:8000"]
+    restart: unless-stopped

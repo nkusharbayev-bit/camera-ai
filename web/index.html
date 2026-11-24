@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera AI panel</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb;
+          --red:#dc2626; --orange:#ea580c; --green:#16a34a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1218; --card:#181c24; --text:#e6e8ec; --muted:#9aa3b2; --line:#2a303b; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; gap:16px; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); background:var(--card); }
+  header h1 { font-size:18px; margin:0; }
+  nav button { border:0; background:none; color:var(--muted); font:inherit; padding:6px 10px; border-radius:6px; cursor:pointer; }
+  nav button.on { background:var(--bg); color:var(--text); font-weight:600; }
+  main { max-width:1100px; margin:0 auto; padding:16px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  select, button.btn { font:inherit; padding:6px 10px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--text); cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .card img { width:100%; display:block; aspect-ratio:16/9; object-fit:cover; background:#000; cursor:pointer; }
+  .card .body { padding:10px 12px; }
+  .badge { display:inline-block; font-size:12px; padding:1px 8px; border-radius:99px; color:#fff; }
+  .high { background:var(--red); } .medium { background:var(--orange); }
+  .status { font-size:13px; color:var(--muted); }
+  .muted { color:var(--muted); }
+  #editor { position:relative; display:inline-block; max-width:100%; }
+  #editor canvas { max-width:100%; border-radius:8px; border:1px solid var(--line); cursor:crosshair; background:#222; }
+  ul.zones { padding-left:18px; }
+  dialog { border:0; border-radius:10px; padding:0; max-width:95vw; background:#000; }
+  dialog video { max-width:95vw; max-height:85vh; display:block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📷 Camera AI</h1>
+  <nav><button id="tab-events" class="on">Hodisalar</button><button id="tab-zones">Zonalar</button></nav>
+</header>
+<main>
+  <section id="events">
+    <div class="row">
+      <select id="f-status">
+        <option value="">Barcha holatlar</option><option value="new">Yangi</option>
+        <option value="confirmed">Tasdiqlangan</option><option value="false_alarm">Yolg'on signal</option>
+      </select>
+      <button class="btn" id="refresh">Yangilash</button>
+      <span class="muted" id="count"></span>
+    </div>
+    <div class="grid" id="list"></div>
+  </section>
+
+  <section id="zones" hidden>
+    <div class="row">
+      <select id="cam"></select>
+      <select id="kind"><option value="shelf">Javon</option><option value="checkout">Kassa</option><option value="exit">Chiqish</option></select>
+      <button class="btn" id="finish">Zonani yopish</button>
+      <button class="btn" id="undo">Oxirgisini o'chirish</button>
+      <button class="btn primary" id="save">Saqlash</button>
+    </div>
+    <p class="muted">Kadr ustiga bosib nuqtalar qo'ying, so'ng "Zonani yopish". Zona odamning <b>oyog'i</b> turadigan pol qismini qamrab olishi kerak.</p>
+    <div id="editor"><canvas id="cv" width="1280" height="720"></canvas></div>
+    <ul class="zones" id="zlist"></ul>
+  </section>
+</main>
+<dialog id="player"><video id="video" controls autoplay></video></dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const STATUS = { new: "🆕 Yangi", confirmed: "✅ Tasdiqlangan", false_alarm: "❌ Yolg'on signal" };
+const SEV = { high: "Yuqori", medium: "O'rta" };
+const COLORS = { shelf: "#ffaa00", checkout: "#00c800", exit: "#ff2020" };
+const LABELS = { shelf: "Javon", checkout: "Kassa", exit: "Chiqish" };
+
+function tab(name) {
+  $("events").hidden = name !== "events"; $("zones").hidden = name !== "zones";
+  $("tab-events").classList.toggle("on", name === "events"); $("tab-zones").classList.toggle("on", name === "zones");
+  if (name === "zones") loadZones();
+}
+$("tab-events").onclick = () => tab("events");
+$("tab-zones").onclick = () => tab("zones");
+
+async function loadEvents() {
+  const st = $("f-status").value;
+  const rows = await (await fetch("/api/events?limit=200" + (st ? "&status=" + st : ""))).json();
+  $("count").textContent = rows.length + " ta hodisa";
+  const list = $("list"); list.innerHTML = "";
+  for (const e of rows) {
+    const el = document.createElement("div"); el.className = "card";
+    const when = new Date(e.created_at * 1000).toLocaleString();
+    el.innerHTML = `
+      <img src="/api/events/${e.id}/snapshot" alt="" loading="lazy">
+      <div class="body">
+        <div class="row" style="margin:0 0 6px"><b>#${e.id}</b><span class="badge ${e.severity}">${SEV[e.severity] || e.severity}</span>
+          <span class="muted">${e.camera_id} · ${when}</span></div>
+        <div>${e.reason}</div>
+        <div class="muted">Javonda ${e.shelf_seconds}s · Kassada ${e.checkout_seconds}s</div>
+        <div class="row" style="margin:8px 0 0">
+          <span class="status">${STATUS[e.status] || e.status}</span>
+          <button class="btn" data-s="confirmed">✅</button><button class="btn" data-s="false_alarm">❌</button>
+        </div>
+      </div>`;
+    el.querySelector("img").onclick = () => {
+      if (!e.clip_path) return alert("Video hali tayyor emas");
+      $("video").src = `/api/events/${e.id}/clip`; $("player").showModal();
+    };
+    el.querySelectorAll("button[data-s]").forEach((b) => b.onclick = async () => {
+      await fetch(`/api/events/${e.id}/review`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: b.dataset.s }) });
+      loadEvents();
+    });
+    list.appendChild(el);
+  }
+}
+$("refresh").onclick = loadEvents; $("f-status").onchange = loadEvents;
+$("player").onclick = (ev) => { if (ev.target.id === "player") { $("video").pause(); $("player").close(); } };
+
+// ---- Zone editor ----
+let zones = [], current = [], bg = new Image();
+const cv = $("cv"), ctx = cv.getContext("2d");
+
+async function loadCams() {
+  const cams = await (await fetch("/api/cameras")).json();
+  $("cam").innerHTML = cams.map((c) => `<option value="${c.id}">${c.name}</option>`).join("");
+}
+async function loadZones() {
+  const cam = $("cam").value; if (!cam) return;
+  zones = (await (await fetch(`/api/cameras/${cam}/zones`)).json()).zones || []; current = [];
+  bg = new Image();
+  bg.onload = () => { cv.width = bg.naturalWidth; cv.height = bg.naturalHeight; draw(); };
+  bg.onerror = () => draw();
+  bg.src = `/api/cameras/${cam}/frame?t=${Date.now()}`;
+  draw();
+}
+function poly(points, color, closed) {
+  if (!points.length) return;
+  ctx.beginPath(); ctx.moveTo(...points[0]); points.slice(1).forEach((p) => ctx.lineTo(...p));
+  if (closed) { ctx.closePath(); ctx.fillStyle = color + "40"; ctx.fill(); }
+  ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.stroke();
+  points.forEach((p) => { ctx.fillStyle = color; ctx.fillRect(p[0] - 4, p[1] - 4, 8, 8); });
+}
+function draw() {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (bg.complete && bg.naturalWidth) ctx.drawImage(bg, 0, 0);
+  else { ctx.fillStyle = "#999"; ctx.font = "24px sans-serif"; ctx.fillText("Kadr yo'q: avval kamera jarayonini ishga tushiring", 30, 50); }
+  zones.forEach((z) => { poly(z.points, COLORS[z.kind], true); ctx.fillStyle = COLORS[z.kind]; ctx.font = "bold 22px sans-serif"; ctx.fillText(z.name, z.points[0][0] + 6, z.points[0][1] + 24); });
+  poly(current, COLORS[$("kind").value], false);
+  $("zlist").innerHTML = zones.map((z, i) => `<li>${z.name} (${LABELS[z.kind]}) <button class="btn" onclick="zones.splice(${i},1);draw()">o'chirish</button></li>`).join("");
+}
+cv.onclick = (ev) => {
+  const r = cv.getBoundingClientRect();
+  current.push([Math.round((ev.clientX - r.left) * cv.width / r.width), Math.round((ev.clientY - r.top) * cv.height / r.height)]);
+  draw();
+};
+$("kind").onchange = draw;
+$("undo").onclick = () => { current.pop(); draw(); };
+$("finish").onclick = () => {
+  if (current.length < 3) return alert("Kamida 3 ta nuqta kerak");
+  const kind = $("kind").value, n = zones.filter((z) => z.kind === kind).length + 1;
+  zones.push({ name: `${LABELS[kind]} ${n}`, kind, points: current }); current = []; draw();
+};
+$("save").onclick = async () => {
+  const r = await fetch(`/api/cameras/${$("cam").value}/zones`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ zones }) });
+  alert(r.ok ? "Saqlandi. Kamera jarayonini qayta ishga tushiring." : "Xato: " + (await r.text()));
+};
+$("cam").onchange = loadZones;
+
+loadCams().then(loadEvents);
+</script>
+</body>
+</html>
